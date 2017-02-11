@@ -4,9 +4,13 @@ import glob
 import os
 import pickle
 import matplotlib.pyplot as plt
+import pylab
+import time
+import imageio
 from scipy.misc import imread, imresize, imsave
 
 out_examples = 0
+MOV_AVG_LENGTH = 10
 
 
 def main():
@@ -31,32 +35,41 @@ def main():
         to_calibrate = imread('camera_cal/calibration2.jpg')
         imsave('output_images/calibration2_calibrated.jpg', cv2.undistort(to_calibrate, mtx, dist, None, mtx))
 
-    cap = cv2.VideoCapture('project_video.mp4')
+    vid = imageio.get_reader('project_video.mp4', 'ffmpeg')
 
-    while (cap.isOpened()):
+    for i, img in enumerate(vid):
 
-        ret, img = cap.read()
+        t_dist0 = time.time()
+        t_fps0 = t_dist0
+        img = cv2.undistort(cv2.cvtColor(img, cv2.COLOR_RGB2BGR), mtx, dist, None, mtx)
+        t_dist = time.time() - t_dist0
 
-        img = cv2.undistort(img, mtx, dist, None, mtx)
 
         # --------------------------- Binary Thresholding ----------------------------
+        #
+        # if out_examples:
+        #     test_images = glob.glob('test_images/*.jpg')
+        #     plt.figure(figsize=(14, 10))
+        #     for i, img in enumerate(test_images):
+        #         img_b = image_binary(cv2.undistort(cv2.imread(img), mtx, dist, None, mtx))
+        #         plt.subplot(3, 3, i + 1)
+        #         plt.axis('off')
+        #         plt.title('%s' % str(img))
+        #         plt.imshow(img_b, cmap='gray')
+        #     plt.show()
 
-        if out_examples:
-            test_images = glob.glob('test_images/*.jpg')
-            plt.figure(figsize=(14, 10))
-            for i, img in enumerate(test_images):
-                img_b = image_binary(cv2.undistort(cv2.imread(img), mtx, dist, None, mtx))
-                plt.subplot(3, 3, i + 1)
-                plt.axis('off')
-                plt.title('%s' % str(img))
-                plt.imshow(img_b, cmap='gray')
-            plt.show()
-
+        t_bin0 = time.time()
         img_b = image_binary(img)
+        t_bin = time.time() - t_bin0
 
         # ---------------------------- Perspective Transform --------------------------
 
-        img_w = warp(img_b)
+        t_warp0 = time.time()
+        src = [585, 457], [700, 457], [1110, img_b.shape[0]], [220, img_b.shape[0]]
+        dst = [src[3][0] + 100, 0], [src[2][0] - 100, 0], [src[2][0] - 100, src[2][1]], [src[3][0] + 100, src[3][1]]
+
+        img_w = warp(img_b, src, dst)
+        t_warp = time.time() - t_warp0
 
         if out_examples:
             # Count from mid frame beyond
@@ -73,14 +86,46 @@ def main():
             #         plt.axis('off')
             # plt.show()
 
-        left_fit, right_fit = sliding_windown(img_w)
+        t_fit0 = time.time()
+        try:
+            left_fit, right_fit = fit_from_lines(left_fit, right_fit, img_w)
 
-        final = draw_lines(img, img_w, left_fit, right_fit, text=radius_curvature(left_fit,right_fit, img_w.shape[0]))
+            mov_avg_left = np.append(mov_avg_left,np.array([left_fit]), axis=0)
+            mov_avg_right = np.append(mov_avg_right,np.array([right_fit]), axis=0)
 
+        except:
+            left_fit, right_fit = sliding_windown(img_w)
+
+            mov_avg_left = np.array([left_fit])
+            mov_avg_right = np.array([right_fit])
+
+        left_fit = np.array([np.mean(mov_avg_left[::-1][:,0][0:MOV_AVG_LENGTH]),
+                             np.mean(mov_avg_left[::-1][:,1][0:MOV_AVG_LENGTH]),
+                             np.mean(mov_avg_left[::-1][:,2][0:MOV_AVG_LENGTH])])
+        right_fit = np.array([np.mean(mov_avg_right[::-1][:,0][0:MOV_AVG_LENGTH]),
+                             np.mean(mov_avg_right[::-1][:,1][0:MOV_AVG_LENGTH]),
+                             np.mean(mov_avg_right[::-1][:,2][0:MOV_AVG_LENGTH])])
+
+        if mov_avg_left.shape[0] > 1000:
+            mov_avg_left = mov_avg_left[0:MOV_AVG_LENGTH]
+        if mov_avg_right.shape[0] > 1000:
+            mov_avg_right = mov_avg_right[0:MOV_AVG_LENGTH]
+
+
+        t_fit = time.time() - t_fit0
+
+        t_draw0 = time.time()
+        final = draw_lines(img, img_w, left_fit, right_fit, perspective=[src,dst])
+        t_draw = time.time() - t_draw0
+
+        # print('fps: %d' % int((1./(t1-t0))))
+        print('undist: %f | bin: %f | warp: %f | fit: %f | draw: %f | fps %f' % (t_dist, t_bin, t_warp, t_fit, t_draw,
+                                                                                 1./(time.time() - t_fps0)))
         cv2.imshow('final', final)
 
-        if cv2.waitKey(15) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
 
 def calibrate_camera(image_files, nx, ny):
     objpoints = []
@@ -103,7 +148,6 @@ def calibrate_camera(image_files, nx, ny):
 
 
 def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255)):
-
     # --------------------------- Binary Thresholding ----------------------------
     # Binary Thresholding is an intermediate step to improve lane line perception
     # it includes image transformation to gray scale to apply sobel transform and
@@ -115,77 +159,60 @@ def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255)):
     # The output is a binary image combined with best of both S transform and mag-
     # nitude thresholding.
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+    gray = hls[:, :, 1]
     s_channel = hls[:, :, 2]
 
+    # Binary matrixes creation
+    sobel_binary = np.zeros(shape=gray.shape, dtype=bool)
+    s_binary = sobel_binary
+    combined_binary = s_binary.astype(np.float32)
 
+    # Sobel Transform
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = 0 #cv2.Sobel(hsv[:, :, 2], cv2.CV_64F, 0, 1, ksize=sobel_kernel)
 
     sobel_abs = np.abs(sobelx**2 + sobely**2)
     sobel_abs = np.uint8(255 * sobel_abs / np.max(sobel_abs))
 
-    sobel_binary = np.zeros_like(gray)
     sobel_binary[(sobel_abs > mag_thresh[0]) & (sobel_abs <= mag_thresh[1])] = 1
 
     # Threshold color channel
-
-    s_binary = np.zeros_like(hls[:, :, 2])
     s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
 
     # Combine the two binary thresholds
-    combined_binary = np.zeros_like(s_binary)
-    combined_binary[(s_binary == 1) | (sobel_binary == 1)] = 1
 
+    combined_binary[(s_binary == 1) | (sobel_binary == 1)] = 1
     #plt.imshow(combined_binary, cmap='gray')
     #plt.show()
 
     return combined_binary
 
 
-def warp(img):
+def warp(img, src, dst):
 
-    img_size = img.shape
+    # src_a = (585, 457)
+    # src_b = (700, 457)
+    # src_c = (1110, img_size[0])
+    # src_d = (220, img_size[0])
+    #
+    # dst_a = (src_d[0]+100, 0)
+    # dst_b = (src_c[0]-100, 0)
+    # dst_c = (src_c[0]-100,src_c[1])
+    # dst_d = (src_d[0]+100,src_d[1])
 
-    src_a = (585, 457)
-    src_b = (700, 457)
-    src_c = (1110, img_size[0])
-    src_d = (220, img_size[0])
+    #src = np.float32([[src_a[0], src_a[1]], [src_b[0], src_b[1]], [src_c[0], src_c[1]], [src_d[0], src_d[1]]])
+    #dst = np.float32([[dst_a[0], dst_a[1]], [dst_b[0], dst_b[1]], [dst_c[0], dst_c[1]], [dst_d[0], dst_d[1]]])
 
-    dst_a = (src_d[0]+100, 0)
-    dst_b = (src_c[0]-100, 0)
-    dst_c = (src_c[0]-100,src_c[1])
-    dst_d = (src_d[0]+100,src_d[1])
-
-    src = np.float32([[src_a[0], src_a[1]], [src_b[0], src_b[1]], [src_c[0], src_c[1]], [src_d[0], src_d[1]]])
-    dst = np.float32([[dst_a[0], dst_a[1]], [dst_b[0], dst_b[1]], [dst_c[0], dst_c[1]], [dst_d[0], dst_d[1]]])
+    src = np.float32([src])
+    dst = np.float32([dst])
     
     return cv2.warpPerspective(img, cv2.getPerspectiveTransform(src, dst),
                                dsize=img.shape[0:2][::-1], flags=cv2.INTER_LINEAR)
 
 
-def unwarp(img):
-    img_size = img.shape
-
-    src_a = (585, 457)
-    src_b = (700, 457)
-    src_c = (1110, img_size[0])
-    src_d = (220, img_size[0])
-
-    dst_a = (src_d[0] + 100, 0)
-    dst_b = (src_c[0] - 100, 0)
-    dst_c = (src_c[0] - 100, src_c[1])
-    dst_d = (src_d[0] + 100, src_d[1])
-
-    src = np.float32([[src_a[0], src_a[1]], [src_b[0], src_b[1]], [src_c[0], src_c[1]], [src_d[0], src_d[1]]])
-    dst = np.float32([[dst_a[0], dst_a[1]], [dst_b[0], dst_b[1]], [dst_c[0], dst_c[1]], [dst_d[0], dst_d[1]]])
-
-    return cv2.warpPerspective(img, cv2.getPerspectiveTransform(dst, src),
-                               dsize=img.shape[0:2][::-1], flags=cv2.INTER_LINEAR)
-
-
 def sliding_windown(img_w):
+
     histogram = np.sum(img_w[int(img_w.shape[0] / 2):, :], axis=0)
     # Create an output image to draw on and visualize the result
     out_img = np.dstack((img_w, img_w, img_w)) * 255
@@ -270,11 +297,11 @@ def sliding_windown(img_w):
     return left_fit, right_fit
 
 
-def fit_from_lines(left_fit, right_fit, img):
-    # Assume you now have a new warped binary image 
+def fit_from_lines(left_fit, right_fit, img_w):
+    # Assume you now have a new warped binary image
     # from the next frame of video (also called "binary_warped")
     # It's now much easier to find line pixels!
-    nonzero = img.nonzero()
+    nonzero = img_w.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
     margin = 100
@@ -296,16 +323,7 @@ def fit_from_lines(left_fit, right_fit, img):
     return left_fit, right_fit
 
 
-def radius_curvature(left_fit, right_fit, img_height=720.):
-
-    y_eval = img_height
-
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-
-    return (left_curverad, right_curverad)
-
-def draw_lines(img, img_w, left_fit, right_fit, text):
+def draw_lines(img, img_w, left_fit, right_fit, perspective):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(img_w).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -322,27 +340,42 @@ def draw_lines(img, img_w, left_fit, right_fit, text):
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-
-    src_a = (585, 457)
-    src_b = (700, 457)
-    src_c = (1110, img.shape[0])
-    src_d = (220, img.shape[0])
-
-    dst_a = (src_d[0] + 100, 0)
-    dst_b = (src_c[0] - 100, 0)
-    dst_c = (src_c[0] - 100, src_c[1])
-    dst_d = (src_d[0] + 100, src_d[1])
-
-    src = np.float32([[src_a[0], src_a[1]], [src_b[0], src_b[1]], [src_c[0], src_c[1]], [src_d[0], src_d[1]]])
-    dst = np.float32([[dst_a[0], dst_a[1]], [dst_b[0], dst_b[1]], [dst_c[0], dst_c[1]], [dst_d[0], dst_d[1]]])
-
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(color_warp, cv2.getPerspectiveTransform(dst, src), (img.shape[1], img.shape[0]))
+    newwarp = warp(color_warp, perspective[1], perspective[0])
     # Combine the result with the original image
     result = cv2.addWeighted(img, 1, newwarp, 0.3, 0)
-    text = "radius = %s [m]" % str(round((float(text[0]) + float(text[1]))/2.,2))
+
+    # ----- Radius Calculation ------ #
+
+    img_height = img.shape[0]
+    y_eval = img_height
+
+    ym_per_pix = 30 / 720.  # meters per pixel in y dimension
+    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
+
+    ploty = np.linspace(0, img_height - 1, img_height)
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(ploty * ym_per_pix, left_fitx * xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty * ym_per_pix, right_fitx * xm_per_pix, 2)
+
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * left_fit_cr[0])
+
+    right_curverad = (
+                         (1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * right_fit_cr[0])
+
+    radius = round((float(left_curverad) + float(right_curverad))/2.,2)
+    if radius < 3000.0:
+        text = "radius = %s [m]" %str(radius)
+    else:
+        text = "radius = -- [m]"
+
     cv2.putText(result, str(text), (0,50), cv2.FONT_HERSHEY_DUPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
     return result
+
+
 
 if __name__ == '__main__':
     main()
