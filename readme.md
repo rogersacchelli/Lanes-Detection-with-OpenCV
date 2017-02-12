@@ -90,11 +90,12 @@ The offset indicated below is a trick to bring left and right lines closer to ea
 This trick increases the number of points which later will be calculated to fit to second order polynomial function, to represent the line.
 
 |Point | Source Points (x,y) | Destination Points (x,y) |
-|-| ------------- | ------------- |
+|--| ------------- | ------------- |
 |A| (595, 452)  | ((Source Xd + offset), 0) |
 |B| (685, 452)  |  ((Source Xc - offset), 0)  |
 |C| (1110, y_size)  | ((Source Xc - offset), y_size)|
 |D| (220, y_size)  | ((Source Xd + offset), y_size) |
+
 
 		line_dst_offset = 200
 		src = [595, 452], \
