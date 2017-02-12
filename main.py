@@ -10,7 +10,7 @@ import imageio
 from scipy.misc import imread, imresize, imsave
 
 out_examples = 0
-MOV_AVG_LENGTH = 10
+MOV_AVG_LENGTH = 5
 
 
 def main():
@@ -32,8 +32,8 @@ def main():
 
     if out_examples:
         # output undistorted image to output_image
-        to_calibrate = imread('camera_cal/calibration2.jpg')
-        imsave('output_images/calibration2_calibrated.jpg', cv2.undistort(to_calibrate, mtx, dist, None, mtx))
+        to_calibrate = imread('camera_cal/calibration3.jpg')
+        imsave('output_images/calibration3_calibrated.jpg', cv2.undistort(to_calibrate, mtx, dist, None, mtx))
 
     vid = imageio.get_reader('project_video.mp4', 'ffmpeg')
 
@@ -65,8 +65,18 @@ def main():
         # ---------------------------- Perspective Transform --------------------------
 
         t_warp0 = time.time()
-        src = [585, 457], [700, 457], [1110, img_b.shape[0]], [220, img_b.shape[0]]
-        dst = [src[3][0] + 100, 0], [src[2][0] - 100, 0], [src[2][0] - 100, src[2][1]], [src[3][0] + 100, src[3][1]]
+        #src = [585, 457], [700, 457], [1110, img_b.shape[0]], [220, img_b.shape[0]]
+
+        line_dst_offset = 200
+        src = [595, 452], \
+              [685, 452], \
+              [1110, img_b.shape[0]], \
+              [220, img_b.shape[0]]
+
+        dst = [src[3][0] + line_dst_offset, 0], \
+              [src[2][0] - line_dst_offset, 0], \
+              [src[2][0] - line_dst_offset, src[2][1]], \
+              [src[3][0] + line_dst_offset, src[3][1]]
 
         img_w = warp(img_b, src, dst)
         t_warp = time.time() - t_warp0
@@ -78,13 +88,13 @@ def main():
             plt.savefig('histogram.jpg')
             plt.close()
 
-            # plt.figure(figsize=(21, 15))
-            # for i, img in enumerate([img, img_b, img_w, imread('histogram.jpg')]):
-            #     plt.subplot(2, 2, i + 1)
-            #     plt.imshow(img, cmap='gray')
-            #     if i == 3:
-            #         plt.axis('off')
-            # plt.show()
+            plt.figure(figsize=(21, 15))
+            for i, img in enumerate([img, img_b, img_w, imread('histogram.jpg')]):
+                plt.subplot(2, 2, i + 1)
+                plt.imshow(img, cmap='gray')
+                if i == 3:
+                    plt.axis('off')
+            plt.show()
 
         t_fit0 = time.time()
         try:
@@ -119,8 +129,8 @@ def main():
         t_draw = time.time() - t_draw0
 
         # print('fps: %d' % int((1./(t1-t0))))
-        print('undist: %f | bin: %f | warp: %f | fit: %f | draw: %f | fps %f' % (t_dist, t_bin, t_warp, t_fit, t_draw,
-                                                                                 1./(time.time() - t_fps0)))
+        print('undist: %f [ms] | bin: %f [ms]| warp: %f [ms]| fit: %f [ms]| draw: %f [ms] | fps %f'
+              % (t_dist * 1000, t_bin * 1000, t_warp * 1000, t_fit * 1000, t_draw * 1000, 1./(time.time() - t_fps0)))
         cv2.imshow('final', final)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -136,11 +146,15 @@ def calibrate_camera(image_files, nx, ny):
 
     for i in image_files:
         img = cv2.imread(i)
+        if img.shape[0] != 720:
+            img = cv2.resize(img,(1280, 720))
+        cv2.imshow('image',img)
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         ret, corners = cv2.findChessboardCorners(gray, (nx, ny))
 
         if ret:
+            print("Calibrated!")
             imgpoints.append(corners)
             objpoints.append(objp)
 
@@ -163,6 +177,7 @@ def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255)):
     gray = hls[:, :, 1]
     s_channel = hls[:, :, 2]
 
+
     # Binary matrixes creation
     sobel_binary = np.zeros(shape=gray.shape, dtype=bool)
     s_binary = sobel_binary
@@ -170,7 +185,7 @@ def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255)):
 
     # Sobel Transform
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
-    sobely = 0 #cv2.Sobel(hsv[:, :, 2], cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    sobely = 0 #cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
 
     sobel_abs = np.abs(sobelx**2 + sobely**2)
     sobel_abs = np.uint8(255 * sobel_abs / np.max(sobel_abs))
@@ -183,26 +198,34 @@ def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255)):
     # Combine the two binary thresholds
 
     combined_binary[(s_binary == 1) | (sobel_binary == 1)] = 1
+    combined_binary = np.uint8(255 * combined_binary / np.max(combined_binary))
+
     #plt.imshow(combined_binary, cmap='gray')
     #plt.show()
 
-    return combined_binary
+    # ---------------- MASKED IMAGE --------------------
+    offset = 100
+    mask_polyg = np.array([[(0 + offset, img.shape[0]),
+                            (img.shape[1] / 2.5, img.shape[0] / 1.65),
+                            (img.shape[1] / 1.8, img.shape[0] / 1.65),
+                            (img.shape[1], img.shape[0])]],
+                          dtype=np.int)
+
+    # mask_polyg = np.concatenate((mask_polyg, mask_polyg, mask_polyg))
+
+    # Next we'll create a masked edges image using cv2.fillPoly()
+    mask_img = np.zeros_like(combined_binary)
+    ignore_mask_color = 255
+
+    # This time we are defining a four sided polygon to mask
+    # Applying polygon
+    cv2.fillPoly(mask_img, mask_polyg, ignore_mask_color)
+    masked_edges = cv2.bitwise_and(combined_binary, mask_img)
+
+    return masked_edges
 
 
 def warp(img, src, dst):
-
-    # src_a = (585, 457)
-    # src_b = (700, 457)
-    # src_c = (1110, img_size[0])
-    # src_d = (220, img_size[0])
-    #
-    # dst_a = (src_d[0]+100, 0)
-    # dst_b = (src_c[0]-100, 0)
-    # dst_c = (src_c[0]-100,src_c[1])
-    # dst_d = (src_d[0]+100,src_d[1])
-
-    #src = np.float32([[src_a[0], src_a[1]], [src_b[0], src_b[1]], [src_c[0], src_c[1]], [src_d[0], src_d[1]]])
-    #dst = np.float32([[dst_a[0], dst_a[1]], [dst_b[0], dst_b[1]], [dst_c[0], dst_c[1]], [dst_d[0], dst_d[1]]])
 
     src = np.float32([src])
     dst = np.float32([dst])
@@ -327,6 +350,7 @@ def draw_lines(img, img_w, left_fit, right_fit, perspective):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(img_w).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+    #color_warp_center = np.dstack((warp_zero, warp_zero, warp_zero))
 
     ploty = np.linspace(0, img.shape[0] - 1, img.shape[0])
 
@@ -339,11 +363,20 @@ def draw_lines(img, img_w, left_fit, right_fit, perspective):
     pts = np.hstack((pts_left, pts_right))
 
     # Draw the lane onto the warped blank image
+    #cv2.fillPoly(color_warp_center, np.int_([pts]), (0, 255, 0))
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = warp(color_warp, perspective[1], perspective[0])
     # Combine the result with the original image
-    result = cv2.addWeighted(img, 1, newwarp, 0.3, 0)
+    result = cv2.addWeighted(img, 1, newwarp, 0.2, 0)
+
+    color_warp_lines = np.dstack((warp_zero, warp_zero, warp_zero))
+    cv2.polylines(color_warp_lines, np.int_([pts_right]), isClosed=False, color=(255, 255, 0), thickness=25)
+    cv2.polylines(color_warp_lines, np.int_([pts_left]), isClosed=False, color=(0, 0, 255), thickness=25)
+    newwarp_lines = warp(color_warp_lines, perspective[1], perspective[0])
+
+    result = cv2.addWeighted(result, 1, newwarp_lines, 1, 0)
 
     # ----- Radius Calculation ------ #
 
@@ -367,12 +400,23 @@ def draw_lines(img, img_w, left_fit, right_fit, perspective):
         2 * right_fit_cr[0])
 
     radius = round((float(left_curverad) + float(right_curverad))/2.,2)
-    if radius < 3000.0:
-        text = "radius = %s [m]" %str(radius)
-    else:
-        text = "radius = -- [m]"
 
-    cv2.putText(result, str(text), (0,50), cv2.FONT_HERSHEY_DUPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
+    # ----- Off Center Calculation ------ #
+
+    lane_width = (right_fit[2] - left_fit[2]) * xm_per_pix
+    center = (right_fit[2] - left_fit[2]) / 2
+    off_left = (center - left_fit[2]) * xm_per_pix
+    off_right = -(right_fit[2] - center) * xm_per_pix
+    off_center = round((center - img.shape[0] / 2.) * xm_per_pix,2)
+
+    # --- Print text on screen ------ #
+    #if radius < 5000.0:
+    text = "radius = %s [m]\noffcenter = %s [m]" % (str(radius), str(off_center))
+    #text = "radius = -- [m]\noffcenter = %s [m]" % (str(off_center))
+
+    for i, line in enumerate(text.split('\n')):
+        i = 50 + 20 * i
+        cv2.putText(result, line, (0,i), cv2.FONT_HERSHEY_DUPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
     return result
 
 
