@@ -96,6 +96,7 @@ def main():
                     plt.axis('off')
             plt.show()
 
+
         t_fit0 = time.time()
         try:
             left_fit, right_fit = fit_from_lines(left_fit, right_fit, img_w)
