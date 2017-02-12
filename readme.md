@@ -36,6 +36,8 @@ Camera calibration is performed by opencv in two steps:
 | ------------- | ------------- |
 | ![Distorted](http://i.imgur.com/HAcV7QF.jpg)   | ![Undistorted](http://i.imgur.com/HBHPVhC.jpg)  |
 
+***Find in the code: main.py:44***
+
  <hr>
 
 ### Thresholded Binary  Image
@@ -75,6 +77,10 @@ Thresholding is applied after image ungoes to [Sobel](http://docs.opencv.org/3.1
 #### Masking
 To reduce the amount of undesired points during image processing, after image thresholding the image is masked to output only the region of interest. This technique improves success of detection.
 
+***Find in the code:*** 
+1. Binary Thresholding:	main.py:62 - image_binary():177-202
+2. Image masking: main.py: 62  - image_binary():208:224
+
 
 ### Perspective Transform
 Perspective transform helps to adjust the difference between real and perceived distance from objects far from camera. Without perspective transform would not be possible to precisely draw the lane line correctly.
@@ -108,6 +114,151 @@ This trick increases the number of points which later will be calculated to fit 
               [src[2][0] - line_dst_offset, src[2][1]], \
               [src[3][0] + line_dst_offset, src[3][1]]
               
+***Find in the code:*** 
+1. Perspective transform: main.py:65:81
 
 ### Detecting Lane Pixels
+
+The binary image obtained allied to perspective transformed image allow us to determine where lane lines are placed.
+
+To start the search for lanes position, an histogram from the binary image is generated. The histogram quantified the number of pixels along 'x' axis, as a consequence peaks found along the histrogram points to lane lines. See below the whole process from obtaining the undistorded image to its histogram.
+
+![](http://i.imgur.com/I8f3dfs.jpg)
+
+
+* Upper left:Undistorted Image
+* Upper right: Binary masked image
+* Lower left: Perspective transformed from binary masked image
+* Lower right: Histogram from binary transformed image
+
+#### Fitting lines to a polynomial function
+As it's possible now to detect the major concentrarion of lines, a technique called sliding window is used to map the group of pixels that forms the lane line and then fit a second order polynomial.
+![](https://d17h27t6h515a5.cloudfront.net/topher/2017/January/588cf5e0_screen-shot-2017-01-28-at-11.49.20-am/screen-shot-2017-01-28-at-11.49.20-am.png)
+
+	# Choose the number of sliding windows
+    nwindows = 9
+    # Set height of windows
+    window_height = np.int(img_w.shape[0] / nwindows)
+    # Identify the x and y positions of all nonzero pixels in the image
+    nonzero = img_w.nonzero()
+    nonzeroy = np.array(nonzero[0])
+    nonzerox = np.array(nonzero[1])
+    # Current positions to be updated for each window
+    leftx_current = leftx_base
+    rightx_current = rightx_base
+    # Set the width of the windows +/- margin
+    margin = 100
+    # Set minimum number of pixels found to recenter window
+    minpix = 50
+    # Create empty lists to receive left and right lane pixel indices
+    left_lane_inds = []
+    right_lane_inds = []
+
+    # Step through the windows one by one
+    for window in range(nwindows):
+        # Identify window boundaries in x and y (and right and left)
+        win_y_low = img_w.shape[0] - (window + 1) * window_height
+        win_y_high = img_w.shape[0] - window * window_height
+        win_xleft_low = leftx_current - margin
+        win_xleft_high = leftx_current + margin
+        win_xright_low = rightx_current - margin
+        win_xright_high = rightx_current + margin
+        # Draw the windows on the visualization image
+        cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
+        cv2.rectangle(out_img, (win_xright_low, win_y_low), (win_xright_high, win_y_high), (0, 255, 0), 2)
+        # Identify the nonzero pixels in x and y within the window
+        good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xleft_low) & (
+            nonzerox < win_xleft_high)).nonzero()[0]
+        good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xright_low) & (
+            nonzerox < win_xright_high)).nonzero()[0]
+        # Append these indices to the lists
+        left_lane_inds.append(good_left_inds)
+        right_lane_inds.append(good_right_inds)
+        # If you found > minpix pixels, recenter next window on their mean position
+        if len(good_left_inds) > minpix:
+            leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
+        if len(good_right_inds) > minpix:
+            rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
+
+    # Concatenate the arrays of indices
+    left_lane_inds = np.concatenate(left_lane_inds)
+    right_lane_inds = np.concatenate(right_lane_inds)
+
+    # Extract left and right line pixel positions
+    leftx = nonzerox[left_lane_inds]
+    lefty = nonzeroy[left_lane_inds]
+    rightx = nonzerox[right_lane_inds]
+    righty = nonzeroy[right_lane_inds]
+
+    # Fit a second order polynomial to each
+    left_fit = np.polyfit(lefty, leftx, 2)
+    right_fit = np.polyfit(righty, rightx, 2)
+    
+
+** Find in the code:**
+1. Fit lines - fit from already found fit - main.py:102
+2. Fit lines - fit from unknown (sliding_windown) - main.py:108
+3. Averaging fit - main.py:110:118
+ 
+
+### Lane Curvature and Off Center distance
+
+
+Lane curvature is calculated throught the following relation:
+
+$ Radius = \frac{[1+(\frac{dx}{dy})^2]^{3/2}}{|\frac{d^2x|}{dy^2}} $
+
+Another important information for the calculation is the representation of each pixel in meters on the image:
+
+> Pixel x axis = 3.7 / 700 m
+> Pixel y axis = 30 / 720 m
+
+
+	ploty = np.linspace(0, img_height - 1, img_height)
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(ploty * ym_per_pix, left_fitx * xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty * ym_per_pix, right_fitx * xm_per_pix, 2)
+
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * left_fit_cr[0])
+
+    right_curverad = (
+                         (1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * right_fit_cr[0])
+
+    radius = round((float(left_curverad) + float(right_curverad))/2.,2)
+    
+
+#### Off Center distance
+
+Since we know the x axis pixel/distance relation and we also know the distance in pixels beween left and right lane, we can calculate the distance the car is from center to the left or to the right, considering that our cam is positioned right in the middle of image.
+
+**Center between lane lines**
+
+$ line_{center} = (right_{fit}[2] - left_{fit}[2]) / 2 $, where:
+
+* $right_{fit}[2]$ and $left_{fit}[2]$, are the linear coeficients from fit functions. They represent where the polynomia function crosses x axis where y = 0;
+
+** Distance in pixels between car center and lanes center**
+
+$offcenter_{pixels} = (line_{center} - car_{center})$
+
+In meters:
+
+$offcenter_{meters} = offcenter_{pixels} * (3.7 / 700)$
+
+** Find in the code **
+1. main.py:129
+2. draw_lines():382:421
+
+### Inverse Perspective Tranformation
+
+A important step even before lane radius calculation is permforming inverse perspective to transform to plot the image on its real shape.
+
+The function is the same from the first perspective transform, but now source and destionation points are inverted on its arguments call.
+
+**Find in the code:**
+1. main.py:129
+2. draw_lines():371, 378
 
