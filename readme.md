@@ -1,6 +1,6 @@
-#Advanced Lane Finding
+# Advanced Lane Finding
 
-##Goals 
+## Goals 
 
 * Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
 * Apply a distortion correction to raw images.
@@ -17,7 +17,7 @@ of lane curvature and vehicle position.
 | ![Raw](http://i.imgur.com/bc60myS.png)   | ![Undistorted](http://i.imgur.com/W6sxa33.png)  |
 
 
-###Camera Calibration
+### Camera Calibration
 
 This is a fundamental step of the project, since without calibration, the image analisys may fall into uncorrect results.
 
@@ -96,7 +96,7 @@ The offset indicated below is a trick to bring left and right lines closer to ea
 This trick increases the number of points which later will be calculated to fit to second order polynomial function, to represent the line.
 
 |Point | Source Points (x,y) | Destination Points (x,y) |
-|-| ------------- | ------------- |
+|------| ------------- | ------------- |
 |A| (595, 452)  | ((Source Xd + offset), 0) |
 |B| (685, 452)  |  ((Source Xc - offset), 0)  |
 |C| (1110, y_size)  | ((Source Xc - offset), y_size)|
@@ -113,6 +113,7 @@ This trick increases the number of points which later will be calculated to fit 
               [src[2][0] - line_dst_offset, src[2][1]], \
               [src[3][0] + line_dst_offset, src[3][1]]
               
+
 ***Find in the code:*** 
 1. Perspective transform: main.py:65:81
 
@@ -194,7 +195,7 @@ As it's possible now to detect the major concentrarion of lines, a technique cal
     right_fit = np.polyfit(righty, rightx, 2)
     
 
-** Find in the code:**
+***Find in the code:*** 
 1. Fit lines - fit from already found fit - main.py:102
 2. Fit lines - fit from unknown (sliding_windown) - main.py:108
 3. Averaging fit - main.py:110:118
@@ -249,7 +250,8 @@ $offcenter_{meters} = offcenter_{pixels} * (3.7 / 700)$
 
 Ig 
 
-** Find in the code **
+
+***Find in the code:*** 
 1. main.py:129
 2. draw_lines():382:421
 
@@ -259,7 +261,8 @@ A important step even before lane radius calculation is permforming inverse pers
 
 The function is the same from the first perspective transform, but now source and destionation points are inverted on its arguments call.
 
-**Find in the code:**
+
+***Find in the code:*** 
 1. main.py:129
 2. draw_lines():371, 378
 
