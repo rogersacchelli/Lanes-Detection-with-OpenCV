@@ -248,8 +248,6 @@ In meters:
 
 $offcenter_{meters} = offcenter_{pixels} * (3.7 / 700)$
 
-Ig 
-
 
 ***Find in the code:*** 
 1. main.py:129
