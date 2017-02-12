@@ -96,12 +96,11 @@ The offset indicated below is a trick to bring left and right lines closer to ea
 This trick increases the number of points which later will be calculated to fit to second order polynomial function, to represent the line.
 
 |Point | Source Points (x,y) | Destination Points (x,y) |
-|--| ------------- | ------------- |
+|-| ------------- | ------------- |
 |A| (595, 452)  | ((Source Xd + offset), 0) |
 |B| (685, 452)  |  ((Source Xc - offset), 0)  |
 |C| (1110, y_size)  | ((Source Xc - offset), y_size)|
 |D| (220, y_size)  | ((Source Xd + offset), y_size) |
-
 
 		line_dst_offset = 200
 		src = [595, 452], \
@@ -248,6 +247,8 @@ In meters:
 
 $offcenter_{meters} = offcenter_{pixels} * (3.7 / 700)$
 
+Ig 
+
 ** Find in the code **
 1. main.py:129
 2. draw_lines():382:421
@@ -261,4 +262,23 @@ The function is the same from the first perspective transform, but now source an
 **Find in the code:**
 1. main.py:129
 2. draw_lines():371, 378
+
+### Video Demostrantion
+
+[![ ](http://img.youtube.com/vi/iFhYH4QPJ9A/0.jpg)](http://www.youtube.com/watch?v=iFhYH4QPJ9A "Advanced Lane Detection")
+
+### Discussion
+
+After completing the basic requirement, two main subjects stand out.
+
+1. Performance:
+The final performance is not as fast as I wanted to be, the fps of roughly 12 fps is not enough for real time scenarios. During processing, two important steps takes almost 50 ms to complete, which gives the processing an starting point of 20 fps, which is already low fps. New improvements then must be made to improve unditortion function and binary transform. An interesting aproach would be porting this delopment from C++ to Python which suggests to speed up the undistortion 5x times:
+
+	[How to speed up image undistortion for a video/image sequence?](https://shiyuzhao1.wordpress.com/2013/11/21/how-to-speed-up-image-undistortion-for-a-videoimage-sequence/)
+
+2. Robustness
+There's a lot to be done to make this framework robust for different envorinments. New videos are available to help this development and from this point beyond it should take much lower effort than bringing the development from zero to this point.
+
+This project was very interesting which gave important skills on computer vision techniques.
+
 
