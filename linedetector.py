@@ -39,15 +39,12 @@ def main():
     vid = imageio.get_reader('project_video.mp4', 'ffmpeg')
 
     lines = Line()
+    image_data = ImageLine(np.zeros(shape=(720,1280,3),dtype=np.float32), ret, mtx, dist, rvecs, tvecs)
 
     for i, img in enumerate(vid):
-
-        t_dist0 = time.time()
-        t_fps0 = t_dist0
-        img = cv2.undistort(cv2.cvtColor(img, cv2.COLOR_RGB2BGR), mtx, dist, None, mtx)
-        t_dist = time.time() - t_dist0
-
-
+        t0 = time.time()
+        image_data.image = img
+        image_data.undistort()
         # --------------------------- Binary Thresholding ----------------------------
         #
         # if out_examples:
@@ -61,43 +58,25 @@ def main():
         #         plt.imshow(img_b, cmap='gray')
         #     plt.show()
 
-        t_bin0 = time.time()
-        img_b = image_binary(img)
-        t_bin = time.time() - t_bin0
 
-        # ---------------------------- Perspective Transform --------------------------
+        image_data.binary()
+        image_data.mask()
+        image_data.warp()
 
-        t_warp0 = time.time()
-        #src = [585, 457], [700, 457], [1110, img_b.shape[0]], [220, img_b.shape[0]]
-
-        line_dst_offset = 200
-        src = [595, 452], \
-              [685, 452], \
-              [1110, img_b.shape[0]], \
-              [220, img_b.shape[0]]
-
-        dst = [src[3][0] + line_dst_offset, 0], \
-              [src[2][0] - line_dst_offset, 0], \
-              [src[2][0] - line_dst_offset, src[2][1]], \
-              [src[3][0] + line_dst_offset, src[3][1]]
-
-        img_w = warp(img_b, src, dst)
-        t_warp = time.time() - t_warp0
-
-        if out_examples:
-            # Count from mid frame beyond
-            histogram = np.sum(img_w[int(img_w.shape[0] / 2):, :], axis=0)
-            plt.plot(histogram)
-            plt.savefig('histogram.jpg')
-            plt.close()
-
-            plt.figure(figsize=(21, 15))
-            for i, img in enumerate([img, img_b, img_w, imread('histogram.jpg')]):
-                plt.subplot(2, 2, i + 1)
-                plt.imshow(img, cmap='gray')
-                if i == 3:
-                    plt.axis('off')
-            plt.show()
+        # if out_examples:
+        #     # Count from mid frame beyond
+        #     histogram = np.sum(image_data.warped_binary[int(image_data.warped_binary.shape[0] / 2):, :], axis=0)
+        #     plt.plot(histogram)
+        #     plt.savefig('histogram.jpg')
+        #     plt.close()
+        #
+        #     plt.figure(figsize=(21, 15))
+        #     for i, img in enumerate([img, img_b, img_w, imread('histogram.jpg')]):
+        #         plt.subplot(2, 2, i + 1)
+        #         plt.imshow(img, cmap='gray')
+        #         if i == 3:
+        #             plt.axis('off')
+        #     plt.show()
 
 
         t_fit0 = time.time()
@@ -215,35 +194,7 @@ def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255), 
         plt.imshow(combined_binary, cmap='gray')
         plt.show()
 
-    # ---------------- MASKED IMAGE --------------------
-    offset = 100
-    mask_polyg = np.array([[(0 + offset, img.shape[0]),
-                            (img.shape[1] / 2.5, img.shape[0] / 1.65),
-                            (img.shape[1] / 1.8, img.shape[0] / 1.65),
-                            (img.shape[1], img.shape[0])]],
-                          dtype=np.int)
 
-    # mask_polyg = np.concatenate((mask_polyg, mask_polyg, mask_polyg))
-
-    # Next we'll create a masked edges image using cv2.fillPoly()
-    mask_img = np.zeros_like(combined_binary)
-    ignore_mask_color = 255
-
-    # This time we are defining a four sided polygon to mask
-    # Applying polygon
-    cv2.fillPoly(mask_img, mask_polyg, ignore_mask_color)
-    masked_edges = cv2.bitwise_and(combined_binary, mask_img)
-
-    return masked_edges
-
-
-def warp(img, src, dst):
-
-    src = np.float32([src])
-    dst = np.float32([dst])
-    
-    return cv2.warpPerspective(img, cv2.getPerspectiveTransform(src, dst),
-                               dsize=img.shape[0:2][::-1], flags=cv2.INTER_LINEAR)
 
 
 def sliding_windown(img_w):
