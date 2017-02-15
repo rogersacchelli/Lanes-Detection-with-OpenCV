@@ -78,16 +78,16 @@ def main():
         #             plt.axis('off')
         #     plt.show()
 
+        if not lines.right__detected or not lines.left_detected:
+            lines.start2fit(image_data)
+        else:
+            lines.fit(image_data)
 
-        t_fit0 = time.time()
         try:
-            left_fit, right_fit = fit_from_lines(left_fit, right_fit, img_w)
-
             mov_avg_left = np.append(mov_avg_left,np.array([left_fit]), axis=0)
             mov_avg_right = np.append(mov_avg_right,np.array([right_fit]), axis=0)
 
         except:
-            left_fit, right_fit = sliding_windown(img_w)
 
             mov_avg_left = np.array([left_fit])
             mov_avg_right = np.array([right_fit])
@@ -111,17 +111,16 @@ def main():
         else:
             lines.turn_side = -1
 
-        t_fit = time.time() - t_fit0
 
         t_draw0 = time.time()
-        final = draw_lines(img, img_w, left_fit, right_fit, perspective=[src,dst])
+        #final = draw_lines(img, img_w, left_fit, right_fit, perspective=[src,dst])
         t_draw = time.time() - t_draw0
 
         # print('fps: %d' % int((1./(t1-t0))))
         #print('undist: %f [ms] | bin: %f [ms]| warp: %f [ms]| fit: %f [ms]| draw: %f [ms] | fps %f'
         #      % (t_dist * 1000, t_bin * 1000, t_warp * 1000, t_fit * 1000, t_draw * 1000, 1./(time.time() - t_fps0)))
         print(lines.turn_side)
-        cv2.imshow('final', final)
+        #cv2.imshow('final', final)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -149,138 +148,6 @@ def calibrate_camera(image_files, nx, ny):
             objpoints.append(objp)
 
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
-
-
-def image_binary(img, sobel_kernel=7, mag_thresh=(3, 255), s_thresh=(170, 255), debug = False):
-    # --------------------------- Binary Thresholding ----------------------------
-    # Binary Thresholding is an intermediate step to improve lane line perception
-    # it includes image transformation to gray scale to apply sobel transform and
-    # binary slicing to output 0,1 type images according to pre-defined threshold.
-    #
-    # Also it's performed RGB to HSV transformation to get S information which in-
-    # tensifies lane line detection.
-    #
-    # The output is a binary image combined with best of both S transform and mag-
-    # nitude thresholding.
-
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    gray = hls[:, :, 1]
-    s_channel = hls[:, :, 2]
-
-
-    # Binary matrixes creation
-    sobel_binary = np.zeros(shape=gray.shape, dtype=bool)
-    s_binary = sobel_binary
-    combined_binary = s_binary.astype(np.float32)
-
-    # Sobel Transform
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
-    sobely = 0 #cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
-
-    sobel_abs = np.abs(sobelx**2 + sobely**2)
-    sobel_abs = np.uint8(255 * sobel_abs / np.max(sobel_abs))
-
-    sobel_binary[(sobel_abs > mag_thresh[0]) & (sobel_abs <= mag_thresh[1])] = 1
-
-    # Threshold color channel
-    s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
-
-    # Combine the two binary thresholds
-
-    combined_binary[(s_binary == 1) | (sobel_binary == 1)] = 1
-    combined_binary = np.uint8(255 * combined_binary / np.max(combined_binary))
-
-    if debug:
-        plt.imshow(combined_binary, cmap='gray')
-        plt.show()
-
-
-
-
-def sliding_windown(img_w):
-
-    histogram = np.sum(img_w[int(img_w.shape[0] / 2):, :], axis=0)
-    # Create an output image to draw on and visualize the result
-    out_img = np.dstack((img_w, img_w, img_w)) * 255
-    # Find the peak of the left and right halves of the histogram
-    # These will be the starting point for the left and right lines
-    midpoint = np.int(histogram.shape[0] / 2)
-    leftx_base = np.argmax(histogram[:midpoint])
-    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-
-    # Choose the number of sliding windows
-    nwindows = 9
-    # Set height of windows
-    window_height = np.int(img_w.shape[0] / nwindows)
-    # Identify the x and y positions of all nonzero pixels in the image
-    nonzero = img_w.nonzero()
-    nonzeroy = np.array(nonzero[0])
-    nonzerox = np.array(nonzero[1])
-    # Current positions to be updated for each window
-    leftx_current = leftx_base
-    rightx_current = rightx_base
-    # Set the width of the windows +/- margin
-    margin = 100
-    # Set minimum number of pixels found to recenter window
-    minpix = 50
-    # Create empty lists to receive left and right lane pixel indices
-    left_lane_inds = []
-    right_lane_inds = []
-
-    # Step through the windows one by one
-    for window in range(nwindows):
-        # Identify window boundaries in x and y (and right and left)
-        win_y_low = img_w.shape[0] - (window + 1) * window_height
-        win_y_high = img_w.shape[0] - window * window_height
-        win_xleft_low = leftx_current - margin
-        win_xleft_high = leftx_current + margin
-        win_xright_low = rightx_current - margin
-        win_xright_high = rightx_current + margin
-        # Draw the windows on the visualization image
-        cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
-        cv2.rectangle(out_img, (win_xright_low, win_y_low), (win_xright_high, win_y_high), (0, 255, 0), 2)
-        # Identify the nonzero pixels in x and y within the window
-        good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xleft_low) & (
-            nonzerox < win_xleft_high)).nonzero()[0]
-        good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & (nonzerox >= win_xright_low) & (
-            nonzerox < win_xright_high)).nonzero()[0]
-        # Append these indices to the lists
-        left_lane_inds.append(good_left_inds)
-        right_lane_inds.append(good_right_inds)
-        # If you found > minpix pixels, recenter next window on their mean position
-        if len(good_left_inds) > minpix:
-            leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
-        if len(good_right_inds) > minpix:
-            rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
-
-    # Concatenate the arrays of indices
-    left_lane_inds = np.concatenate(left_lane_inds)
-    right_lane_inds = np.concatenate(right_lane_inds)
-
-    # Extract left and right line pixel positions
-    leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds]
-    rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds]
-
-    # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
-
-    # Generate x and y values for plotting
-    # ploty = np.linspace(0, img_w.shape[0] - 1, img_w.shape[0])
-    # left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-    # right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
-    #
-    # out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
-    # out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
-    # plt.imshow(out_img)
-    # plt.plot(left_fitx, ploty, color='yellow')
-    # plt.plot(right_fitx, ploty, color='yellow')
-    # plt.xlim(0, 1280)
-    # plt.ylim(720, 0)
-
-    return left_fit, right_fit
 
 
 def fit_from_lines(left_fit, right_fit, img_w):
@@ -337,9 +204,9 @@ def draw_lines(img, img_w, left_fit, right_fit, perspective):
     color_warp_lines = np.dstack((warp_zero, warp_zero, warp_zero))
     cv2.polylines(color_warp_lines, np.int_([pts_right]), isClosed=False, color=(255, 255, 0), thickness=25)
     cv2.polylines(color_warp_lines, np.int_([pts_left]), isClosed=False, color=(0, 0, 255), thickness=25)
-    newwarp_lines = warp(color_warp_lines, perspective[1], perspective[0])
+    #newwarp_lines = warp(color_warp_lines, perspective[1], perspective[0])
 
-    result = cv2.addWeighted(img, 1, newwarp_lines, 1, 0)
+    #result = cv2.addWeighted(img, 1, newwarp_lines, 1, 0)
 
     # ----- Radius Calculation ------ #
 
@@ -379,8 +246,8 @@ def draw_lines(img, img_w, left_fit, right_fit, perspective):
 
     for i, line in enumerate(text.split('\n')):
         i = 50 + 20 * i
-        cv2.putText(result, line, (0,i), cv2.FONT_HERSHEY_DUPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
-    return result
+    #    cv2.putText(result, line, (0,i), cv2.FONT_HERSHEY_DUPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
+    #return result
 
 
 
